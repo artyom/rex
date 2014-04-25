@@ -28,6 +28,9 @@ func init() {
 
 func main() {
 	flag.Parse()
+	if concurrency < 1 {
+		concurrency = 1
+	}
 	hosts := flag.Args()
 	if len(hosts) == 0 {
 		flag.Usage()
