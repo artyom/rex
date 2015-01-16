@@ -10,33 +10,44 @@ import (
 	"os"
 	"sync"
 
-	"code.google.com/p/go.crypto/ssh"
-	"code.google.com/p/go.crypto/ssh/agent"
+	"github.com/artyom/autoflags"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
-var concurrency uint
-var command string
-
 func init() {
-	flag.UintVar(&concurrency, "n", 10, "concurrent ssh sessions")
-	flag.StringVar(&command, "c", "uptime", "command to execute")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] ip1 ip2 ...\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 }
 
+type Config struct {
+	Concurrency int    `flag:"n,concurrent ssh sessions"`
+	Command     string `flag:"cmd,command to run"`
+	Login       string `flag:"l,login to use"`
+	Port        int    `flag:"p,port"`
+}
+
 func main() {
+	log.SetFlags(log.Lshortfile)
+	conf := Config{
+		Concurrency: 100,
+		Login:       "root",
+		Port:        22,
+	}
+	if err := autoflags.Define(&conf); err != nil {
+		log.Fatal(err)
+	}
 	flag.Parse()
-	if concurrency < 1 {
-		concurrency = 1
+	if conf.Concurrency < 1 {
+		conf.Concurrency = 1
 	}
 	hosts := flag.Args()
-	if len(hosts) == 0 {
+	if len(hosts) == 0 || len(conf.Command) == 0 {
 		flag.Usage()
 		return
 	}
-	log.SetFlags(log.Lshortfile)
 	var sshAgent agent.Agent
 	agentConn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
@@ -51,7 +62,7 @@ func main() {
 	}
 
 	config := &ssh.ClientConfig{
-		User: "root",
+		User: conf.Login,
 		Auth: []ssh.AuthMethod{ssh.PublicKeys(signers...)},
 	}
 
@@ -70,7 +81,7 @@ func main() {
 		}
 	}()
 
-	limit := make(chan struct{}, concurrency)
+	limit := make(chan struct{}, conf.Concurrency)
 
 	for _, host := range hosts {
 		limit <- struct{}{}
@@ -78,7 +89,7 @@ func main() {
 		go func(host string) {
 			defer wg.Done()
 			defer func() { <-limit }()
-			if err := RemoteCommand(host, command, config, stdout, stderr); err != nil {
+			if err := RemoteCommand(host, conf, config, stdout, stderr); err != nil {
 				log.Println(err)
 			}
 		}(host)
@@ -86,8 +97,8 @@ func main() {
 	wg.Wait()
 }
 
-func RemoteCommand(host, command string, config *ssh.ClientConfig, stdout, stderr chan<- string) error {
-	client, err := ssh.Dial("tcp", host+":22", config)
+func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, stderr chan<- string) error {
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, conf.Port), config)
 	if err != nil {
 		return err
 	}
@@ -109,7 +120,7 @@ func RemoteCommand(host, command string, config *ssh.ClientConfig, stdout, stder
 	go pipeFeeder("OUT\t"+host, stdoutPipe, stdout)
 	go pipeFeeder("ERR\t"+host, stderrPipe, stderr)
 
-	if err := session.Start(command); err != nil {
+	if err := session.Start(conf.Command); err != nil {
 		return err
 	}
 	return session.Wait()
