@@ -36,9 +36,7 @@ func main() {
 		Login:       "root",
 		Port:        22,
 	}
-	if err := autoflags.Define(&conf); err != nil {
-		log.Fatal(err)
-	}
+	autoflags.Define(&conf)
 	flag.Parse()
 	if conf.Concurrency < 1 {
 		conf.Concurrency = 1
