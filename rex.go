@@ -145,13 +145,13 @@ func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, s
 		if err != nil {
 			return err
 		}
-		defer stdoutLog.Close()
+		defer closeAndRemoveIfAt0(stdoutLog)
 		session.Stdout = stdoutLog
 		stderrLog, err := os.Create(filepath.Clean(fmt.Sprintf(conf.StderrFmt, host)))
 		if err != nil {
 			return err
 		}
-		defer stderrLog.Close()
+		defer closeAndRemoveIfAt0(stderrLog)
 		session.Stderr = stderrLog
 	default:
 		stdoutPipe, err := session.StdoutPipe()
@@ -178,4 +178,11 @@ func pipeFeeder(prefix string, pipe io.Reader, sink chan<- string) {
 	if err := scanner.Err(); err != nil {
 		return // TODO: report error to separate channel
 	}
+}
+
+func closeAndRemoveIfAt0(f *os.File) {
+	if n, err := f.Seek(0, os.SEEK_CUR); err == nil && n == 0 {
+		os.Remove(f.Name())
+	}
+	f.Close()
 }
