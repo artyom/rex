@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/artyom/autoflags"
+	"github.com/ttacon/chalk"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -88,11 +89,18 @@ func main() {
 	stderr := make(chan string, 10)
 	go func() {
 		for {
+			stdoutPrefix, stderrPrefix := ".", "E"
+			if isTerminal(os.Stdout) {
+				stdoutPrefix = chalk.Green.Color(stdoutPrefix)
+			}
+			if isTerminal(os.Stderr) {
+				stderrPrefix = chalk.Red.Color(stderrPrefix)
+			}
 			select {
 			case item := <-stdout:
-				fmt.Println(item)
+				fmt.Fprintln(os.Stdout, stdoutPrefix, item)
 			case item := <-stderr:
-				fmt.Println(item)
+				fmt.Fprintln(os.Stderr, stderrPrefix, item)
 			}
 		}
 	}()
@@ -163,8 +171,8 @@ func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, s
 			return err
 		}
 
-		go pipeFeeder("OUT\t"+host, stdoutPipe, stdout)
-		go pipeFeeder("ERR\t"+host, stderrPipe, stderr)
+		go pipeFeeder(host, stdoutPipe, stdout)
+		go pipeFeeder(host, stderrPipe, stderr)
 	}
 
 	return session.Run(conf.Command)
@@ -176,7 +184,7 @@ func pipeFeeder(prefix string, pipe io.Reader, sink chan<- string) {
 		sink <- prefix + "\t" + scanner.Text()
 	}
 	if err := scanner.Err(); err != nil {
-		return // TODO: report error to separate channel
+		log.Print("string scanner error", err)
 	}
 }
 
@@ -185,4 +193,12 @@ func closeAndRemoveIfAt0(f *os.File) {
 		os.Remove(f.Name())
 	}
 	f.Close()
+}
+
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return st.Mode()&os.ModeDevice != 0
 }
