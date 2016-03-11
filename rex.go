@@ -17,6 +17,7 @@ import (
 	"github.com/ttacon/chalk"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/net/proxy"
 )
 
 func init() {
@@ -137,7 +138,7 @@ func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, s
 	if !strings.ContainsRune(addr, ':') {
 		addr = fmt.Sprintf("%s:%d", addr, conf.Port)
 	}
-	client, err := ssh.Dial("tcp", addr, config)
+	client, err := sshDial("tcp", addr, config)
 	if err != nil {
 		return err
 	}
@@ -220,3 +221,17 @@ func isTerminal(f *os.File) bool {
 	}
 	return st.Mode()&os.ModeDevice != 0
 }
+
+func sshDial(network, addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
+	conn, err := proxyDialer.Dial(network, addr)
+	if err != nil {
+		return nil, err
+	}
+	c, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
+	if err != nil {
+		return nil, err
+	}
+	return ssh.NewClient(c, chans, reqs), nil
+}
+
+var proxyDialer = proxy.FromEnvironment()
