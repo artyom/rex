@@ -36,7 +36,7 @@ type Config struct {
 }
 
 func main() {
-	log.SetFlags(log.Lshortfile)
+	log.SetFlags(0)
 	conf := Config{
 		Concurrency: 100,
 		Login:       "root",
@@ -123,7 +123,7 @@ func main() {
 				fmt.Println(host, "processed")
 			case err == nil:
 			default:
-				log.Println(err)
+				log.Println(host, err)
 			}
 		}(host)
 	}
