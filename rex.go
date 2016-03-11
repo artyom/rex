@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ type Config struct {
 	Command     string `flag:"cmd,command to run"`
 	Login       string `flag:"l,login to use"`
 	Port        int    `flag:"p,default port"`
+	StdinFile   string `flag:"stdin,REGULAR (no piping!) file to pass to stdin of remote command"`
 	DumpFiles   bool   `flag:"logs,save stdout/stderr to separate per-host logs"`
 	StdoutFmt   string `flag:"logs.stdout,format of stdout per-host log name"`
 	StderrFmt   string `flag:"logs.stderr,format of stderr per-host log name"`
@@ -146,6 +148,22 @@ func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, s
 		return err
 	}
 	defer session.Close()
+
+	if conf.StdinFile != "" {
+		f, err := os.Open(conf.StdinFile)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		st, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if !st.Mode().IsRegular() {
+			return errors.New("file passed to stdin is not a regular file")
+		}
+		session.Stdin = f
+	}
 
 	switch {
 	case conf.DumpFiles:
