@@ -118,10 +118,7 @@ func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, s
 	go pipeFeeder("OUT\t"+host, stdoutPipe, stdout)
 	go pipeFeeder("ERR\t"+host, stderrPipe, stderr)
 
-	if err := session.Start(conf.Command); err != nil {
-		return err
-	}
-	return session.Wait()
+	return session.Run(conf.Command)
 }
 
 func pipeFeeder(prefix string, pipe io.Reader, sink chan<- string) {
