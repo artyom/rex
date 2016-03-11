@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -28,6 +29,9 @@ type Config struct {
 	Command     string `flag:"cmd,command to run"`
 	Login       string `flag:"l,login to use"`
 	Port        int    `flag:"p,default port"`
+	DumpFiles   bool   `flag:"logs,save stdout/stderr to separate per-host logs"`
+	StdoutFmt   string `flag:"logs.stdout,format of stdout per-host log name"`
+	StderrFmt   string `flag:"logs.stderr,format of stderr per-host log name"`
 }
 
 func main() {
@@ -36,6 +40,8 @@ func main() {
 		Concurrency: 100,
 		Login:       "root",
 		Port:        22,
+		StdoutFmt:   "/tmp/%s.stdout",
+		StderrFmt:   "/tmp/%s.stderr",
 	}
 	autoflags.Define(&conf)
 	flag.Parse()
@@ -46,6 +52,17 @@ func main() {
 	if len(hosts) == 0 || len(conf.Command) == 0 {
 		flag.Usage()
 		return
+	}
+	if conf.DumpFiles {
+		if conf.StdoutFmt == conf.StderrFmt {
+			log.Fatal("file format for stdout and stderr should differ")
+		}
+		if !strings.Contains(conf.StdoutFmt, `%s`) {
+			log.Fatal("invalid format for stdout log name")
+		}
+		if !strings.Contains(conf.StderrFmt, `%s`) {
+			log.Fatal("invalid format for stderr log name")
+		}
 	}
 	var sshAgent agent.Agent
 	agentConn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
@@ -82,13 +99,22 @@ func main() {
 
 	limit := make(chan struct{}, conf.Concurrency)
 
+	uniqueHosts := make(map[string]struct{})
 	for _, host := range hosts {
+		uniqueHosts[host] = struct{}{}
+	}
+
+	for host := range uniqueHosts {
 		limit <- struct{}{}
 		wg.Add(1)
 		go func(host string) {
 			defer wg.Done()
 			defer func() { <-limit }()
-			if err := RemoteCommand(host, conf, config, stdout, stderr); err != nil {
+			switch err := RemoteCommand(host, conf, config, stdout, stderr); {
+			case err == nil && conf.DumpFiles:
+				fmt.Println(host, "processed")
+			case err == nil:
+			default:
 				log.Println(err)
 			}
 		}(host)
@@ -106,22 +132,40 @@ func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, s
 		return err
 	}
 	defer client.Close()
+
 	session, err := client.NewSession()
 	if err != nil {
 		return err
 	}
 	defer session.Close()
-	stdoutPipe, err := session.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderrPipe, err := session.StderrPipe()
-	if err != nil {
-		return err
-	}
 
-	go pipeFeeder("OUT\t"+host, stdoutPipe, stdout)
-	go pipeFeeder("ERR\t"+host, stderrPipe, stderr)
+	switch {
+	case conf.DumpFiles:
+		stdoutLog, err := os.Create(filepath.Clean(fmt.Sprintf(conf.StdoutFmt, host)))
+		if err != nil {
+			return err
+		}
+		defer stdoutLog.Close()
+		session.Stdout = stdoutLog
+		stderrLog, err := os.Create(filepath.Clean(fmt.Sprintf(conf.StderrFmt, host)))
+		if err != nil {
+			return err
+		}
+		defer stderrLog.Close()
+		session.Stderr = stderrLog
+	default:
+		stdoutPipe, err := session.StdoutPipe()
+		if err != nil {
+			return err
+		}
+		stderrPipe, err := session.StderrPipe()
+		if err != nil {
+			return err
+		}
+
+		go pipeFeeder("OUT\t"+host, stdoutPipe, stdout)
+		go pipeFeeder("ERR\t"+host, stderrPipe, stderr)
+	}
 
 	return session.Run(conf.Command)
 }
