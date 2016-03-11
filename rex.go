@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/artyom/autoflags"
@@ -26,7 +27,7 @@ type Config struct {
 	Concurrency int    `flag:"n,concurrent ssh sessions"`
 	Command     string `flag:"cmd,command to run"`
 	Login       string `flag:"l,login to use"`
-	Port        int    `flag:"p,port"`
+	Port        int    `flag:"p,default port"`
 }
 
 func main() {
@@ -96,7 +97,11 @@ func main() {
 }
 
 func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, stderr chan<- string) error {
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, conf.Port), config)
+	addr := host
+	if !strings.ContainsRune(addr, ':') {
+		addr = fmt.Sprintf("%s:%d", addr, conf.Port)
+	}
+	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return err
 	}
