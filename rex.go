@@ -39,6 +39,7 @@ type Config struct {
 	StderrFmt   string `flag:"logs.stderr,format of stderr per-host log name"`
 
 	stdoutPrefix, stderrPrefix string
+	stdoutIsTerm, stderrIsTerm bool
 }
 
 func main() {
@@ -75,24 +76,34 @@ func main() {
 		}
 	}
 	if isTerminal(os.Stdout) {
+		conf.stdoutIsTerm = true
 		conf.stdoutPrefix = chalk.Green.Color(conf.stdoutPrefix)
 	}
-	var colorErrors bool
 	if isTerminal(os.Stderr) {
-		colorErrors = true
+		conf.stderrIsTerm = true
 		conf.stderrPrefix = chalk.Yellow.Color(conf.stderrPrefix)
 	}
+	switch err := run(conf, hosts); err {
+	case nil:
+	case errSomeJobFailed:
+		os.Exit(123)
+	default:
+		log.Fatal(err)
+	}
+}
+
+func run(conf Config, hosts []string) error {
 	var sshAgent agent.Agent
 	agentConn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	sshAgent = agent.NewClient(agentConn)
 	defer agentConn.Close()
 
 	signers, err := sshAgent.Signers()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	authMethods := []ssh.AuthMethod{ssh.PublicKeys(signers...)}
@@ -119,7 +130,7 @@ func main() {
 			case err == nil:
 			default:
 				atomic.AddInt32(&errCnt, 1)
-				if colorErrors {
+				if conf.stderrIsTerm {
 					host = chalk.Red.Color(host)
 				}
 				log.Println(host, err)
@@ -128,8 +139,9 @@ func main() {
 	}
 	wg.Wait()
 	if errCnt > 0 {
-		os.Exit(123)
+		return errSomeJobFailed
 	}
+	return nil
 }
 
 func RemoteCommand(addr string, conf Config, authMethods []ssh.AuthMethod) error {
@@ -262,6 +274,8 @@ func sshDial(network, addr string, config *ssh.ClientConfig) (*ssh.Client, error
 }
 
 var proxyDialer = proxy.FromEnvironment()
+
+var errSomeJobFailed = fmt.Errorf("some job(s) failed")
 
 const remoteHostVarname = `REX_REMOTE_HOST`
 
