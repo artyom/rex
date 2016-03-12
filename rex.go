@@ -92,10 +92,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	config := &ssh.ClientConfig{
-		User: conf.Login,
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(signers...)},
-	}
+	authMethods := []ssh.AuthMethod{ssh.PublicKeys(signers...)}
 
 	var wg sync.WaitGroup
 
@@ -112,7 +109,7 @@ func main() {
 		go func(host string) {
 			defer wg.Done()
 			defer func() { <-limit }()
-			switch err := RemoteCommand(host, conf, config); {
+			switch err := RemoteCommand(host, conf, authMethods); {
 			case err == nil && conf.DumpFiles:
 				fmt.Println(host, "processed")
 			case err == nil:
@@ -124,12 +121,16 @@ func main() {
 	wg.Wait()
 }
 
-func RemoteCommand(host string, conf Config, config *ssh.ClientConfig) error {
+func RemoteCommand(host string, conf Config, authMethods []ssh.AuthMethod) error {
+	sshConfig := &ssh.ClientConfig{
+		User: conf.Login,
+		Auth: authMethods,
+	}
 	addr := host
 	if !strings.ContainsRune(addr, ':') {
 		addr = fmt.Sprintf("%s:%d", addr, conf.Port)
 	}
-	client, err := sshDial("tcp", addr, config)
+	client, err := sshDial("tcp", addr, sshConfig)
 	if err != nil {
 		return err
 	}
