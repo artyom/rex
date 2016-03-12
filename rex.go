@@ -77,8 +77,10 @@ func main() {
 	if isTerminal(os.Stdout) {
 		conf.stdoutPrefix = chalk.Green.Color(conf.stdoutPrefix)
 	}
+	var colorErrors bool
 	if isTerminal(os.Stderr) {
-		conf.stderrPrefix = chalk.Red.Color(conf.stderrPrefix)
+		colorErrors = true
+		conf.stderrPrefix = chalk.Yellow.Color(conf.stderrPrefix)
 	}
 	var sshAgent agent.Agent
 	agentConn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
@@ -117,6 +119,9 @@ func main() {
 			case err == nil:
 			default:
 				atomic.AddInt32(&errCnt, 1)
+				if colorErrors {
+					host = chalk.Red.Color(host)
+				}
 				log.Println(host, err)
 			}
 		}(host)
