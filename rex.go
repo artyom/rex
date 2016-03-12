@@ -36,6 +36,8 @@ type Config struct {
 	DumpFiles   bool   `flag:"logs,save stdout/stderr to separate per-host logs"`
 	StdoutFmt   string `flag:"logs.stdout,format of stdout per-host log name"`
 	StderrFmt   string `flag:"logs.stderr,format of stderr per-host log name"`
+
+	stdoutPrefix, stderrPrefix string
 }
 
 func main() {
@@ -46,6 +48,9 @@ func main() {
 		Port:        22,
 		StdoutFmt:   "/tmp/%s.stdout",
 		StderrFmt:   "/tmp/%s.stderr",
+
+		stdoutPrefix: ".",
+		stderrPrefix: "E",
 	}
 	autoflags.Define(&conf)
 	flag.Parse()
@@ -68,6 +73,12 @@ func main() {
 			log.Fatal("invalid format for stderr log name")
 		}
 	}
+	if isTerminal(os.Stdout) {
+		conf.stdoutPrefix = chalk.Green.Color(conf.stdoutPrefix)
+	}
+	if isTerminal(os.Stderr) {
+		conf.stderrPrefix = chalk.Red.Color(conf.stderrPrefix)
+	}
 	var sshAgent agent.Agent
 	agentConn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
@@ -88,26 +99,6 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	stdout := make(chan string, 10)
-	stderr := make(chan string, 10)
-	go func() {
-		for {
-			stdoutPrefix, stderrPrefix := ".", "E"
-			if isTerminal(os.Stdout) {
-				stdoutPrefix = chalk.Green.Color(stdoutPrefix)
-			}
-			if isTerminal(os.Stderr) {
-				stderrPrefix = chalk.Red.Color(stderrPrefix)
-			}
-			select {
-			case item := <-stdout:
-				fmt.Fprintln(os.Stdout, stdoutPrefix, item)
-			case item := <-stderr:
-				fmt.Fprintln(os.Stderr, stderrPrefix, item)
-			}
-		}
-	}()
-
 	limit := make(chan struct{}, conf.Concurrency)
 
 	uniqueHosts := make(map[string]struct{})
@@ -121,7 +112,7 @@ func main() {
 		go func(host string) {
 			defer wg.Done()
 			defer func() { <-limit }()
-			switch err := RemoteCommand(host, conf, config, stdout, stderr); {
+			switch err := RemoteCommand(host, conf, config); {
 			case err == nil && conf.DumpFiles:
 				fmt.Println(host, "processed")
 			case err == nil:
@@ -133,7 +124,7 @@ func main() {
 	wg.Wait()
 }
 
-func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, stderr chan<- string) error {
+func RemoteCommand(host string, conf Config, config *ssh.ClientConfig) error {
 	addr := host
 	if !strings.ContainsRune(addr, ':') {
 		addr = fmt.Sprintf("%s:%d", addr, conf.Port)
@@ -190,17 +181,24 @@ func RemoteCommand(host string, conf Config, config *ssh.ClientConfig, stdout, s
 			return err
 		}
 
-		go pipeFeeder(host, stdoutPipe, stdout)
-		go pipeFeeder(host, stderrPipe, stderr)
+		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stdoutPrefix, host), os.Stdout, stdoutPipe)
+		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stderrPrefix, host), os.Stderr, stderrPipe)
 	}
 
 	return session.Run(conf.Command)
 }
 
-func pipeFeeder(prefix string, pipe io.Reader, sink chan<- string) {
+func byLineCopy(prefix string, sink io.Writer, pipe io.Reader) {
+	buf := []byte(prefix)
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
-		sink <- prefix + "\t" + scanner.Text()
+		buf := buf[:len(prefix)]
+		buf = append(buf, scanner.Bytes()...)
+		buf = append(buf, '\n')
+		// this is safe to write a single line to stdout/stderr without
+		// additional locking from multiple goroutines as os guarantees
+		// those writes are atomic (for stdout/stderr only)
+		sink.Write(buf)
 	}
 	if err := scanner.Err(); err != nil {
 		log.Print("string scanner error", err)
