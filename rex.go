@@ -8,8 +8,10 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -121,14 +123,11 @@ func main() {
 	wg.Wait()
 }
 
-func RemoteCommand(host string, conf Config, authMethods []ssh.AuthMethod) error {
+func RemoteCommand(addr string, conf Config, authMethods []ssh.AuthMethod) error {
+	login, addr := loginAndAddr(conf.Login, addr, conf.Port)
 	sshConfig := &ssh.ClientConfig{
-		User: conf.Login,
+		User: login,
 		Auth: authMethods,
-	}
-	addr := host
-	if !strings.ContainsRune(addr, ':') {
-		addr = fmt.Sprintf("%s:%d", addr, conf.Port)
 	}
 	client, err := sshDial("tcp", addr, sshConfig)
 	if err != nil {
@@ -141,6 +140,11 @@ func RemoteCommand(host string, conf Config, authMethods []ssh.AuthMethod) error
 		return err
 	}
 	defer session.Close()
+
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
 
 	if conf.StdinFile != "" {
 		f, err := os.Open(conf.StdinFile)
@@ -219,6 +223,21 @@ func isTerminal(f *os.File) bool {
 		return false
 	}
 	return st.Mode()&os.ModeDevice != 0
+}
+
+func loginAndAddr(defaultLogin, addr string, defaultPort int) (login, hostPort string) {
+	login = defaultLogin
+	u, err := url.Parse("//" + addr) // add slashes so that it properly parsed as url
+	if err != nil {
+		return defaultLogin, addr
+	}
+	if u.User != nil {
+		login = u.User.Username()
+	}
+	if _, _, err := net.SplitHostPort(u.Host); err == nil {
+		return login, u.Host
+	}
+	return login, net.JoinHostPort(u.Host, strconv.Itoa(defaultPort))
 }
 
 func sshDial(network, addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
