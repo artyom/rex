@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/artyom/autoflags"
 	"github.com/ttacon/chalk"
@@ -103,6 +104,7 @@ func main() {
 		uniqueHosts[host] = struct{}{}
 	}
 
+	var errCnt int32
 	for host := range uniqueHosts {
 		limit <- struct{}{}
 		wg.Add(1)
@@ -114,11 +116,15 @@ func main() {
 				fmt.Println(host, "processed")
 			case err == nil:
 			default:
+				atomic.AddInt32(&errCnt, 1)
 				log.Println(host, err)
 			}
 		}(host)
 	}
 	wg.Wait()
+	if errCnt > 0 {
+		os.Exit(123)
+	}
 }
 
 func RemoteCommand(addr string, conf Config, authMethods []ssh.AuthMethod) error {
