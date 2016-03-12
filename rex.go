@@ -23,7 +23,7 @@ import (
 
 func init() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [flags] ip1 ip2 ...\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [flags] host1 host2:port user@host3:port...\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 }
@@ -31,7 +31,7 @@ func init() {
 type Config struct {
 	Concurrency int    `flag:"n,concurrent ssh sessions"`
 	Command     string `flag:"cmd,command to run"`
-	Login       string `flag:"l,login to use"`
+	Login       string `flag:"l,default login"`
 	Port        int    `flag:"p,default port"`
 	StdinFile   string `flag:"stdin,REGULAR (no piping!) file to pass to stdin of remote command"`
 	DumpFiles   bool   `flag:"logs,save stdout/stderr to separate per-host logs"`
