@@ -1,3 +1,8 @@
+// Command rex executes given command on multiple remote hosts, connecting to
+// them via ssh in parallel.
+//
+// You're expected to have passwordless acces to hosts, rex authenticates itself
+// speaking to ssh-agent that is expected to be running.
 package main
 
 import (
