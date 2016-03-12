@@ -51,7 +51,7 @@ func main() {
 	log.SetFlags(0)
 	conf := Config{
 		Concurrency: 100,
-		Login:       "root",
+		Login:       os.Getenv("REX_USER"),
 		Port:        22,
 		GroupFile:   os.ExpandEnv("${HOME}/.rex-groups.yaml"),
 		StdoutFmt:   "/tmp/${" + remoteHostVarname + "}.stdout",
@@ -59,6 +59,9 @@ func main() {
 
 		stdoutPrefix: ".",
 		stderrPrefix: "E",
+	}
+	if conf.Login == "" {
+		conf.Login = os.Getenv("USER")
 	}
 	autoflags.Define(&conf)
 	flag.Parse()
