@@ -42,9 +42,12 @@ type Config struct {
 	DumpFiles   bool   `flag:"logs,save stdout/stderr to separate per-host logs"`
 	StdoutFmt   string `flag:"logs.stdout,format of stdout per-host log name"`
 	StderrFmt   string `flag:"logs.stderr,format of stderr per-host log name"`
+	WithSuffix  bool   `flag:"fullnames,do not strip common suffix in hostname output"`
 
 	stdoutPrefix, stderrPrefix string
 	stdoutIsTerm, stderrIsTerm bool
+
+	commonSuffix string
 }
 
 func main() {
@@ -125,9 +128,13 @@ func run(conf Config, hosts []string) error {
 	if err != nil {
 		return err
 	}
+	hosts = uniqueHosts(hosts)
+	if !conf.WithSuffix {
+		conf.commonSuffix = commonSuffix(hosts)
+	}
 
 	var errCnt int32
-	for _, host := range uniqueHosts(hosts) {
+	for _, host := range hosts {
 		limit <- struct{}{}
 		wg.Add(1)
 		go func(host string) {
@@ -216,6 +223,13 @@ func RemoteCommand(addr string, conf Config, authMethods []ssh.AuthMethod) error
 			return err
 		}
 
+		host := host // shadow var
+		if !conf.WithSuffix {
+			h_ := strings.TrimSuffix(host, conf.commonSuffix)
+			if h_ != host {
+				host = h_ + "…"
+			}
+		}
 		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stdoutPrefix, host), os.Stdout, stdoutPipe)
 		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stderrPrefix, host), os.Stderr, stderrPipe)
 	}
@@ -349,4 +363,37 @@ expand:
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+func commonSuffix(l []string) string {
+	if len(l) < 2 {
+		return ""
+	}
+	min := reverse(l[0])
+	max := min
+	for _, s := range l[1:] {
+		switch rs := reverse(s); {
+		case rs < min:
+			min = rs
+		case rs > max:
+			max = rs
+		}
+	}
+	for i := 0; i < len(min) && i < len(max); i++ {
+		if min[i] != max[i] {
+			return reverse(min[:i])
+		}
+	}
+	return reverse(min)
+}
+
+func reverse(s string) string {
+	rs := []rune(s)
+	if len(rs) < 2 {
+		return s
+	}
+	for i, j := 0, len(rs)-1; i < j; i, j = i+1, j-1 {
+		rs[i], rs[j] = rs[j], rs[i]
+	}
+	return string(rs)
 }
