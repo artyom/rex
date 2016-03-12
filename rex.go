@@ -5,14 +5,18 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
+
+	"gopkg.in/yaml.v2"
 
 	"github.com/artyom/autoflags"
 	"github.com/ttacon/chalk"
@@ -33,6 +37,7 @@ type Config struct {
 	Command     string `flag:"cmd,command to run"`
 	Login       string `flag:"l,default login"`
 	Port        int    `flag:"p,default port"`
+	GroupFile   string `flag:"g,yaml file with host groups"`
 	StdinFile   string `flag:"stdin,REGULAR (no piping!) file to pass to stdin of remote command"`
 	DumpFiles   bool   `flag:"logs,save stdout/stderr to separate per-host logs"`
 	StdoutFmt   string `flag:"logs.stdout,format of stdout per-host log name"`
@@ -48,6 +53,7 @@ func main() {
 		Concurrency: 100,
 		Login:       "root",
 		Port:        22,
+		GroupFile:   os.ExpandEnv("${HOME}/.rex-groups.yaml"),
 		StdoutFmt:   "/tmp/${" + remoteHostVarname + "}.stdout",
 		StderrFmt:   "/tmp/${" + remoteHostVarname + "}.stderr",
 
@@ -112,13 +118,13 @@ func run(conf Config, hosts []string) error {
 
 	limit := make(chan struct{}, conf.Concurrency)
 
-	uniqueHosts := make(map[string]struct{})
-	for _, host := range hosts {
-		uniqueHosts[host] = struct{}{}
+	hosts, err = expandGroups(hosts, conf.GroupFile)
+	if err != nil {
+		return err
 	}
 
 	var errCnt int32
-	for host := range uniqueHosts {
+	for _, host := range uniqueHosts(hosts) {
 		limit <- struct{}{}
 		wg.Add(1)
 		go func(host string) {
@@ -300,4 +306,44 @@ func checkFilenameTemplate(s string) error {
 		return fmt.Errorf("no ${%s} in pattern", remoteHostVarname)
 	}
 	return nil
+}
+
+func uniqueHosts(hosts []string) []string {
+	seen := make(map[string]struct{})
+	out := hosts[:0]
+	for _, v := range hosts {
+		if _, ok := seen[v]; !ok {
+			out = append(out, v)
+			seen[v] = struct{}{}
+		}
+	}
+	return out
+}
+
+func expandGroups(hosts []string, groupFile string) ([]string, error) {
+	var groups map[string][]string
+	for _, v := range hosts {
+		if strings.HasPrefix(v, "@") {
+			data, err := ioutil.ReadFile(groupFile)
+			if err != nil {
+				return nil, err
+			}
+			groups = make(map[string][]string)
+			if err := yaml.Unmarshal(data, groups); err != nil {
+				return nil, err
+			}
+			goto expand
+		}
+	}
+	return hosts, nil // no need to read/parse file if groups are not used
+expand:
+	var out []string
+	for _, v := range hosts {
+		if strings.HasPrefix(v, "@") {
+			out = append(out, groups[v[1:]]...)
+			continue
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }
