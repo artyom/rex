@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/artyom/autoflags"
@@ -48,8 +46,8 @@ func main() {
 		Concurrency: 100,
 		Login:       "root",
 		Port:        22,
-		StdoutFmt:   "/tmp/%s.stdout",
-		StderrFmt:   "/tmp/%s.stderr",
+		StdoutFmt:   "/tmp/${" + remoteHostVarname + "}.stdout",
+		StderrFmt:   "/tmp/${" + remoteHostVarname + "}.stderr",
 
 		stdoutPrefix: ".",
 		stderrPrefix: "E",
@@ -68,11 +66,11 @@ func main() {
 		if conf.StdoutFmt == conf.StderrFmt {
 			log.Fatal("file format for stdout and stderr should differ")
 		}
-		if !strings.Contains(conf.StdoutFmt, `%s`) {
-			log.Fatal("invalid format for stdout log name")
+		if err := checkFilenameTemplate(conf.StdoutFmt); err != nil {
+			log.Fatal("stdout filename format:", err)
 		}
-		if !strings.Contains(conf.StderrFmt, `%s`) {
-			log.Fatal("invalid format for stderr log name")
+		if err := checkFilenameTemplate(conf.StderrFmt); err != nil {
+			log.Fatal("stderr filename format:", err)
 		}
 	}
 	if isTerminal(os.Stdout) {
@@ -157,20 +155,20 @@ func RemoteCommand(addr string, conf Config, authMethods []ssh.AuthMethod) error
 			return err
 		}
 		if !st.Mode().IsRegular() {
-			return errors.New("file passed to stdin is not a regular file")
+			return fmt.Errorf("file passed to stdin is not a regular file")
 		}
 		session.Stdin = f
 	}
 
 	switch {
 	case conf.DumpFiles:
-		stdoutLog, err := os.Create(filepath.Clean(fmt.Sprintf(conf.StdoutFmt, host)))
+		stdoutLog, err := os.Create(filepath.Clean(expandHostname(conf.StdoutFmt, host)))
 		if err != nil {
 			return err
 		}
 		defer closeAndRemoveIfAt0(stdoutLog)
 		session.Stdout = stdoutLog
-		stderrLog, err := os.Create(filepath.Clean(fmt.Sprintf(conf.StderrFmt, host)))
+		stderrLog, err := os.Create(filepath.Clean(expandHostname(conf.StderrFmt, host)))
 		if err != nil {
 			return err
 		}
@@ -253,3 +251,28 @@ func sshDial(network, addr string, config *ssh.ClientConfig) (*ssh.Client, error
 }
 
 var proxyDialer = proxy.FromEnvironment()
+
+const remoteHostVarname = `REX_REMOTE_HOST`
+
+func expandHostname(s, hostname string) string {
+	return os.Expand(s, func(x string) string {
+		if x == remoteHostVarname {
+			return hostname
+		}
+		return os.Getenv(s)
+	})
+}
+
+func checkFilenameTemplate(s string) error {
+	varSet := os.Expand(s, func(x string) string {
+		if x == remoteHostVarname {
+			return "value"
+		}
+		return ""
+	})
+	varUnset := os.Expand(s, func(string) string { return "" })
+	if varSet == varUnset {
+		return fmt.Errorf("no ${%s} in pattern", remoteHostVarname)
+	}
+	return nil
+}
