@@ -24,7 +24,6 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/artyom/autoflags"
-	"github.com/ttacon/chalk"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/net/proxy"
@@ -94,11 +93,11 @@ func main() {
 	}
 	if isTerminal(os.Stdout) {
 		conf.stdoutIsTerm = true
-		conf.stdoutPrefix = chalk.Green.Color(conf.stdoutPrefix)
+		conf.stdoutPrefix = string(escape.Green) + conf.stdoutPrefix + string(escape.Reset)
 	}
 	if isTerminal(os.Stderr) {
 		conf.stderrIsTerm = true
-		conf.stderrPrefix = chalk.Yellow.Color(conf.stderrPrefix)
+		conf.stderrPrefix = string(escape.Yellow) + conf.stderrPrefix + string(escape.Reset)
 	}
 	switch err := run(conf, hosts); err {
 	case nil:
@@ -152,7 +151,7 @@ func run(conf Config, hosts []string) error {
 			default:
 				atomic.AddInt32(&errCnt, 1)
 				if conf.stderrIsTerm {
-					host = chalk.Red.Color(host)
+					host = string(escape.Red) + host + string(escape.Reset)
 				}
 				log.Println(host, err)
 			}
@@ -401,4 +400,22 @@ func reverse(s string) string {
 		rs[i], rs[j] = rs[j], rs[i]
 	}
 	return string(rs)
+}
+
+const keyEscape = 27
+
+// copy of v100EscapeCodes from golang.org/x/crypto/ssh/terminal/terminal.go
+var escape = struct {
+	Black, Red, Green, Yellow, Blue, Magenta, Cyan, White, Reset []byte
+}{
+	Black:   []byte{keyEscape, '[', '3', '0', 'm'},
+	Red:     []byte{keyEscape, '[', '3', '1', 'm'},
+	Green:   []byte{keyEscape, '[', '3', '2', 'm'},
+	Yellow:  []byte{keyEscape, '[', '3', '3', 'm'},
+	Blue:    []byte{keyEscape, '[', '3', '4', 'm'},
+	Magenta: []byte{keyEscape, '[', '3', '5', 'm'},
+	Cyan:    []byte{keyEscape, '[', '3', '6', 'm'},
+	White:   []byte{keyEscape, '[', '3', '7', 'm'},
+
+	Reset: []byte{keyEscape, '[', '0', 'm'},
 }
