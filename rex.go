@@ -203,6 +203,7 @@ func RemoteCommand(addr string, conf Config, authMethods []ssh.AuthMethod) error
 		session.Stdin = f
 	}
 
+	var copyDone sync.WaitGroup // used to guard completion of stdout/stderr dumps
 	switch {
 	case conf.DumpFiles:
 		stdoutLog, err := os.Create(filepath.Clean(expandHostname(conf.StdoutFmt, host)))
@@ -234,14 +235,18 @@ func RemoteCommand(addr string, conf Config, authMethods []ssh.AuthMethod) error
 				host = h_ + "…"
 			}
 		}
-		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stdoutPrefix, host), os.Stdout, stdoutPipe)
-		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stderrPrefix, host), os.Stderr, stderrPipe)
+		copyDone.Add(2)
+		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stdoutPrefix, host), os.Stdout, stdoutPipe, &copyDone)
+		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stderrPrefix, host), os.Stderr, stderrPipe, &copyDone)
 	}
 
-	return session.Run(conf.Command)
+	err = session.Run(conf.Command)
+	copyDone.Wait()
+	return err
 }
 
-func byLineCopy(prefix string, sink io.Writer, pipe io.Reader) {
+func byLineCopy(prefix string, sink io.Writer, pipe io.Reader, wg *sync.WaitGroup) {
+	defer wg.Done()
 	buf := []byte(prefix)
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
