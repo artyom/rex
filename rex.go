@@ -48,6 +48,8 @@ type Config struct {
 	StderrFmt   string `flag:"logs.stderr,format of stderr per-host log name"`
 	WithSuffix  bool   `flag:"fullnames,do not strip common suffix in hostname output"`
 
+	ForwardAgent bool `flag:"a,forward ssh-agent connection"`
+
 	stdoutPrefix, stderrPrefix string
 	stdoutIsTerm, stderrIsTerm bool
 
@@ -144,7 +146,7 @@ func run(conf Config, hosts []string) error {
 		go func(host string) {
 			defer wg.Done()
 			defer func() { <-limit }()
-			switch err := RemoteCommand(host, conf, authMethods); {
+			switch err := RemoteCommand(host, conf, sshAgent, authMethods); {
 			case err == nil && conf.DumpFiles:
 				fmt.Println(host, "processed")
 			case err == nil:
@@ -164,7 +166,7 @@ func run(conf Config, hosts []string) error {
 	return nil
 }
 
-func RemoteCommand(addr string, conf Config, authMethods []ssh.AuthMethod) error {
+func RemoteCommand(addr string, conf Config, sshAgent agent.Agent, authMethods []ssh.AuthMethod) error {
 	login, addr := loginAndAddr(conf.Login, addr, conf.Port)
 	sshConfig := &ssh.ClientConfig{
 		User: login,
@@ -181,6 +183,15 @@ func RemoteCommand(addr string, conf Config, authMethods []ssh.AuthMethod) error
 		return err
 	}
 	defer session.Close()
+
+	if conf.ForwardAgent {
+		if err := agent.ForwardToAgent(client, sshAgent); err != nil {
+			return err
+		}
+		if err := agent.RequestAgentForwarding(session); err != nil {
+			return err
+		}
+	}
 
 	host := addr
 	if h, _, err := net.SplitHostPort(addr); err == nil {
