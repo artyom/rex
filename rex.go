@@ -175,8 +175,9 @@ func run(conf Config, hosts []string) error {
 func RemoteCommand(addr string, conf Config, sshAgent agent.Agent, authMethods []ssh.AuthMethod) error {
 	login, addr := loginAndAddr(conf.Login, addr, conf.Port)
 	sshConfig := &ssh.ClientConfig{
-		User: login,
-		Auth: authMethods,
+		User:            login,
+		Auth:            authMethods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 	client, err := sshDial("tcp", addr, sshConfig)
 	if err != nil {
