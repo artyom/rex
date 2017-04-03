@@ -54,6 +54,7 @@ type Config struct {
 	stdoutIsTerm, stderrIsTerm bool
 
 	commonSuffix string
+	maxHostWidth int
 }
 
 func main() {
@@ -137,6 +138,11 @@ func run(conf Config, hosts []string) error {
 	hosts = uniqueHosts(hosts)
 	if !conf.WithSuffix {
 		conf.commonSuffix = commonSuffix(hosts)
+	}
+	for _, host := range hosts {
+		if l := len(host); l > conf.maxHostWidth {
+			conf.maxHostWidth = l
+		}
 	}
 
 	var errCnt int32
@@ -240,15 +246,17 @@ func RemoteCommand(addr string, conf Config, sshAgent agent.Agent, authMethods [
 		}
 
 		host := host // shadow var
+		width := conf.maxHostWidth
 		if !conf.WithSuffix {
 			h_ := strings.TrimSuffix(host, conf.commonSuffix)
 			if h_ != host {
 				host = h_ + "…"
+				width -= (len(conf.commonSuffix) - 1)
 			}
 		}
 		copyDone.Add(2)
-		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stdoutPrefix, host), os.Stdout, stdoutPipe, &copyDone)
-		go byLineCopy(fmt.Sprintf("%s %s\t", conf.stderrPrefix, host), os.Stderr, stderrPipe, &copyDone)
+		go byLineCopy(fmt.Sprintf("%[1]s %-[3]*[2]s ", conf.stdoutPrefix, host, width), os.Stdout, stdoutPipe, &copyDone)
+		go byLineCopy(fmt.Sprintf("%[1]s %-[3]*[2]s ", conf.stderrPrefix, host, width), os.Stderr, stderrPipe, &copyDone)
 	}
 
 	err = session.Run(conf.Command)
