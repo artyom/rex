@@ -7,6 +7,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -42,6 +43,7 @@ type Config struct {
 	Login       string `flag:"l,default login"`
 	Port        int    `flag:"p,default port"`
 	GroupFile   string `flag:"g,yaml file with host groups"`
+	KnownHosts  string `flag:"knownHosts,path to known_hosts file to verify host keys against, empty to disable"`
 	StdinFile   string `flag:"stdin,REGULAR (no piping!) file to pass to stdin of remote command"`
 	DumpFiles   bool   `flag:"logs,save stdout/stderr to separate per-host logs"`
 	StdoutFmt   string `flag:"logs.stdout,format of stdout per-host log name"`
@@ -64,6 +66,7 @@ func main() {
 		Login:       os.Getenv("REX_USER"),
 		Port:        22,
 		GroupFile:   os.ExpandEnv("${HOME}/.rex-groups.yaml"),
+		KnownHosts:  os.ExpandEnv("${HOME}/.ssh/known_hosts"),
 		StdoutFmt:   "/tmp/${" + remoteHostVarname + "}.stdout",
 		StderrFmt:   "/tmp/${" + remoteHostVarname + "}.stderr",
 
@@ -124,6 +127,14 @@ func run(conf Config, hosts []string) error {
 	if err != nil {
 		return err
 	}
+	hostKeyCallback := ssh.InsecureIgnoreHostKey()
+	if conf.KnownHosts != "" {
+		fn, err := knownHostsKeyMatch(conf.KnownHosts)
+		if err != nil {
+			return fmt.Errorf("failed to parse known_hosts: %v", err)
+		}
+		hostKeyCallback = fn
+	}
 
 	authMethods := []ssh.AuthMethod{ssh.PublicKeys(signers...)}
 
@@ -152,7 +163,7 @@ func run(conf Config, hosts []string) error {
 		go func(host string) {
 			defer wg.Done()
 			defer func() { <-limit }()
-			switch err := RemoteCommand(host, conf, sshAgent, authMethods); {
+			switch err := RemoteCommand(host, conf, sshAgent, hostKeyCallback, authMethods); {
 			case err == nil && conf.DumpFiles:
 				fmt.Println(host, "processed")
 			case err == nil:
@@ -172,12 +183,12 @@ func run(conf Config, hosts []string) error {
 	return nil
 }
 
-func RemoteCommand(addr string, conf Config, sshAgent agent.Agent, authMethods []ssh.AuthMethod) error {
+func RemoteCommand(addr string, conf Config, sshAgent agent.Agent, cb ssh.HostKeyCallback, authMethods []ssh.AuthMethod) error {
 	login, addr := loginAndAddr(conf.Login, addr, conf.Port)
 	sshConfig := &ssh.ClientConfig{
 		User:            login,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: cb,
 	}
 	client, err := sshDial("tcp", addr, sshConfig)
 	if err != nil {
@@ -311,6 +322,38 @@ func loginAndAddr(defaultLogin, addr string, defaultPort int) (login, hostPort s
 		return login, u.Host
 	}
 	return login, net.JoinHostPort(u.Host, strconv.Itoa(defaultPort))
+}
+
+func knownHostsKeyMatch(name string) (ssh.HostKeyCallback, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	m := make(map[string]struct{})
+	scanner := bufio.NewScanner(f)
+	var lineNo int
+	for scanner.Scan() {
+		lineNo++
+		if bytes.HasPrefix(scanner.Bytes(), []byte("#")) {
+			continue
+		}
+		_, _, key, _, _, err := ssh.ParseKnownHosts(scanner.Bytes())
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %v", lineNo, err)
+		}
+		m[ssh.FingerprintSHA256(key)] = struct{}{}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		fp := ssh.FingerprintSHA256(key)
+		if _, ok := m[fp]; ok {
+			return nil
+		}
+		return fmt.Errorf("key %q for %q not found in known_hosts", fp, hostname)
+	}, nil
 }
 
 func sshDial(network, addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
