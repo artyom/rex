@@ -7,7 +7,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -27,6 +26,7 @@ import (
 	"github.com/artyom/autoflags"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/net/proxy"
 )
 
@@ -129,7 +129,7 @@ func run(conf Config, hosts []string) error {
 	}
 	hostKeyCallback := ssh.InsecureIgnoreHostKey()
 	if conf.KnownHosts != "" {
-		fn, err := knownHostsKeyMatch(conf.KnownHosts)
+		fn, err := knownhosts.New(conf.KnownHosts)
 		if err != nil {
 			return fmt.Errorf("failed to parse known_hosts: %v", err)
 		}
@@ -322,38 +322,6 @@ func loginAndAddr(defaultLogin, addr string, defaultPort int) (login, hostPort s
 		return login, u.Host
 	}
 	return login, net.JoinHostPort(u.Host, strconv.Itoa(defaultPort))
-}
-
-func knownHostsKeyMatch(name string) (ssh.HostKeyCallback, error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	m := make(map[string]struct{})
-	scanner := bufio.NewScanner(f)
-	var lineNo int
-	for scanner.Scan() {
-		lineNo++
-		if bytes.HasPrefix(scanner.Bytes(), []byte("#")) {
-			continue
-		}
-		_, _, key, _, _, err := ssh.ParseKnownHosts(scanner.Bytes())
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %v", lineNo, err)
-		}
-		m[ssh.FingerprintSHA256(key)] = struct{}{}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-		fp := ssh.FingerprintSHA256(key)
-		if _, ok := m[fp]; ok {
-			return nil
-		}
-		return fmt.Errorf("key %q for %q not found in known_hosts", fp, hostname)
-	}, nil
 }
 
 func sshDial(network, addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
