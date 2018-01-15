@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,10 +66,10 @@ func main() {
 		Concurrency: 100,
 		Login:       os.Getenv("REX_USER"),
 		Port:        22,
-		GroupFile:   os.ExpandEnv("${HOME}/.rex-groups.yaml"),
-		KnownHosts:  os.ExpandEnv("${HOME}/.ssh/known_hosts"),
-		StdoutFmt:   "/tmp/${" + remoteHostVarname + "}.stdout",
-		StderrFmt:   "/tmp/${" + remoteHostVarname + "}.stderr",
+		GroupFile:   filepath.FromSlash(path.Join(os.Getenv("HOME"), ".rex-groups.yaml")),
+		KnownHosts:  filepath.FromSlash(path.Join(os.Getenv("HOME"), ".ssh/known_hosts")),
+		StdoutFmt:   filepath.Join(os.TempDir(), "${"+remoteHostVarname+"}.stdout"),
+		StderrFmt:   filepath.Join(os.TempDir(), "${"+remoteHostVarname+"}.stderr"),
 
 		stdoutPrefix: ".",
 		stderrPrefix: "E",
