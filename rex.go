@@ -137,7 +137,7 @@ func run(conf Config, hosts []string) error {
 		hostKeyCallback = fn
 	}
 
-	authMethods := []ssh.AuthMethod{ssh.PublicKeys(signers...)}
+	authMethods := []ssh.AuthMethod{ssh.PublicKeys(signers...), ssh.KeyboardInteractive(keyboardChallenge)}
 
 	var wg sync.WaitGroup
 
@@ -437,6 +437,13 @@ func reverse(s string) string {
 		rs[i], rs[j] = rs[j], rs[i]
 	}
 	return string(rs)
+}
+
+func keyboardChallenge(user, instruction string, questions []string, echos []bool) (answers []string, err error) {
+	if len(questions) == 0 {
+		return nil, nil
+	}
+	return nil, fmt.Errorf("keyboard interactive challenge is not supported")
 }
 
 const keyEscape = 27
