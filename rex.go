@@ -60,6 +60,13 @@ type Config struct {
 	maxHostWidth int
 }
 
+var (
+	// overridable at build time like
+	// go build -ldflags="-X=main.stdoutPrefix=☺︎"
+	stdoutPrefix = "."
+	stderrPrefix = "E"
+)
+
 func main() {
 	log.SetFlags(0)
 	conf := Config{
@@ -71,8 +78,8 @@ func main() {
 		StdoutFmt:   filepath.Join(os.TempDir(), "${"+remoteHostVarname+"}.stdout"),
 		StderrFmt:   filepath.Join(os.TempDir(), "${"+remoteHostVarname+"}.stderr"),
 
-		stdoutPrefix: ".",
-		stderrPrefix: "E",
+		stdoutPrefix: stdoutPrefix,
+		stderrPrefix: stderrPrefix,
 	}
 	if conf.Login == "" {
 		conf.Login = os.Getenv("USER")
