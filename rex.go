@@ -7,6 +7,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -21,8 +22,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
-	"gopkg.in/yaml.v2"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/artyom/autoflags"
 	"golang.org/x/crypto/ssh"
@@ -51,7 +53,8 @@ type Config struct {
 	StderrFmt   string `flag:"logs.stderr,format of stderr per-host log name"`
 	WithSuffix  bool   `flag:"fullnames,do not strip common suffix in hostname output"`
 
-	ForwardAgent bool `flag:"a,forward ssh-agent connection"`
+	DialTimeout  time.Duration `flag:"dt,dial timeout"`
+	ForwardAgent bool          `flag:"a,forward ssh-agent connection"`
 
 	stdoutPrefix, stderrPrefix string
 	stdoutIsTerm, stderrIsTerm bool
@@ -77,6 +80,7 @@ func main() {
 		KnownHosts:  filepath.FromSlash(path.Join(os.Getenv("HOME"), ".ssh/known_hosts")),
 		StdoutFmt:   filepath.Join(os.TempDir(), "${"+remoteHostVarname+"}.stdout"),
 		StderrFmt:   filepath.Join(os.TempDir(), "${"+remoteHostVarname+"}.stderr"),
+		DialTimeout: 10 * time.Second,
 
 		stdoutPrefix: stdoutPrefix,
 		stderrPrefix: stderrPrefix,
@@ -198,7 +202,7 @@ func RemoteCommand(addr string, conf Config, sshAgent agent.Agent, cb ssh.HostKe
 		Auth:            authMethods,
 		HostKeyCallback: cb,
 	}
-	client, err := sshDial("tcp", addr, sshConfig)
+	client, err := sshDial("tcp", addr, conf.DialTimeout, sshConfig)
 	if err != nil {
 		return err
 	}
@@ -332,8 +336,10 @@ func loginAndAddr(defaultLogin, addr string, defaultPort int) (login, hostPort s
 	return login, net.JoinHostPort(u.Host, strconv.Itoa(defaultPort))
 }
 
-func sshDial(network, addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
-	conn, err := proxyDialer.Dial(network, addr)
+func sshDial(network, addr string, dialTimeout time.Duration, config *ssh.ClientConfig) (*ssh.Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	conn, err := proxy.Dial(ctx, network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -343,8 +349,6 @@ func sshDial(network, addr string, config *ssh.ClientConfig) (*ssh.Client, error
 	}
 	return ssh.NewClient(c, chans, reqs), nil
 }
-
-var proxyDialer = proxy.FromEnvironment()
 
 var errSomeJobFailed = fmt.Errorf("some job(s) failed")
 
