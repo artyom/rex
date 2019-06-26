@@ -10,7 +10,9 @@ with the help of ssh-agent that is expected to be running.
 
 ## Setup
 
-	go get -u -v github.com/artyom/rex
+	cd $(mktemp -d) && go mod init tmp && go get github.com/artyom/rex
+
+Binary will be placed either to directory set with `${GOBIN}` environment or to `${GOPATH}/bin` which defaults to `${HOME}/go/bin`.
 
 ## Usage examples
 

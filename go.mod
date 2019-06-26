@@ -6,3 +6,5 @@ require (
 	golang.org/x/net v0.0.0-20190502183928-7f726cade0ab
 	gopkg.in/yaml.v2 v2.2.1
 )
+
+go 1.13
