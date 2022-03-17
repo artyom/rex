@@ -10,7 +10,7 @@ with the help of ssh-agent that is expected to be running.
 
 ## Setup
 
-	cd $(mktemp -d) && go mod init tmp && go get github.com/artyom/rex
+	go install github.com/artyom/rex@latest
 
 Binary will be placed either to directory set with `${GOBIN}` environment or to `${GOPATH}/bin` which defaults to `${HOME}/go/bin`.
 
