@@ -11,7 +11,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/url"
@@ -307,7 +306,7 @@ func byLineCopy(prefix string, sink io.Writer, pipe io.Reader, wg *sync.WaitGrou
 }
 
 func closeAndRemoveIfAt0(f *os.File) {
-	if n, err := f.Seek(0, os.SEEK_CUR); err == nil && n == 0 {
+	if n, err := f.Seek(0, io.SeekCurrent); err == nil && n == 0 {
 		os.Remove(f.Name())
 	}
 	f.Close()
@@ -393,7 +392,7 @@ func expandGroups(hosts []string, groupFile string) ([]string, error) {
 	var groups map[string][]string
 	for _, v := range hosts {
 		if strings.HasPrefix(v, "@") {
-			data, err := ioutil.ReadFile(groupFile)
+			data, err := os.ReadFile(groupFile)
 			if err != nil {
 				return nil, err
 			}
