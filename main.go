@@ -7,7 +7,9 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,10 +19,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	yaml "gopkg.in/yaml.v2"
@@ -30,6 +32,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/net/proxy"
+	"golang.org/x/sync/errgroup"
 )
 
 func init() {
@@ -73,7 +76,7 @@ func main() {
 	log.SetFlags(0)
 	conf := Config{
 		Concurrency: 100,
-		Login:       os.Getenv("REX_USER"),
+		Login:       cmp.Or(os.Getenv("REX_USER"), os.Getenv("USER")),
 		Port:        22,
 		GroupFile:   filepath.FromSlash(path.Join(os.Getenv("HOME"), ".rex-groups.yaml")),
 		KnownHosts:  filepath.FromSlash(path.Join(os.Getenv("HOME"), ".ssh/known_hosts")),
@@ -83,9 +86,6 @@ func main() {
 
 		stdoutPrefix: stdoutPrefix,
 		stderrPrefix: stderrPrefix,
-	}
-	if conf.Login == "" {
-		conf.Login = os.Getenv("USER")
 	}
 	autoflags.Define(&conf)
 	flag.Parse()
@@ -149,15 +149,12 @@ func run(conf Config, hosts []string) error {
 
 	authMethods := []ssh.AuthMethod{ssh.PublicKeys(signers...), ssh.KeyboardInteractive(keyboardChallenge)}
 
-	var wg sync.WaitGroup
-
-	limit := make(chan struct{}, conf.Concurrency)
-
 	hosts, err = expandGroups(hosts, conf.GroupFile)
 	if err != nil {
 		return err
 	}
-	hosts = uniqueHosts(hosts)
+	slices.Sort(hosts)
+	hosts = slices.Compact(hosts)
 	if !conf.WithSuffix {
 		conf.commonSuffix = commonSuffix(hosts)
 	}
@@ -166,29 +163,24 @@ func run(conf Config, hosts []string) error {
 			conf.maxHostWidth = l
 		}
 	}
-
-	var errCnt int32
+	var group errgroup.Group
+	group.SetLimit(conf.Concurrency)
 	for _, host := range hosts {
-		limit <- struct{}{}
-		wg.Add(1)
-		go func(host string) {
-			defer wg.Done()
-			defer func() { <-limit }()
-			switch err := RemoteCommand(host, conf, sshAgent, hostKeyCallback, authMethods); {
+		group.Go(func() error {
+			err := RemoteCommand(host, conf, sshAgent, hostKeyCallback, authMethods)
+			switch {
 			case err == nil && conf.DumpFiles:
 				fmt.Println(host, "processed")
-			case err == nil:
-			default:
-				atomic.AddInt32(&errCnt, 1)
+			case err != nil:
 				if conf.stderrIsTerm {
 					host = string(escape.Red) + host + string(escape.Reset)
 				}
 				log.Println(host, err)
 			}
-		}(host)
+			return err
+		})
 	}
-	wg.Wait()
-	if errCnt > 0 {
+	if group.Wait() != nil {
 		return errSomeJobFailed
 	}
 	return nil
@@ -349,7 +341,7 @@ func sshDial(network, addr string, dialTimeout time.Duration, config *ssh.Client
 	return ssh.NewClient(c, chans, reqs), nil
 }
 
-var errSomeJobFailed = fmt.Errorf("some job(s) failed")
+var errSomeJobFailed = errors.New("some job(s) failed")
 
 const remoteHostVarname = `REX_REMOTE_HOST`
 
@@ -374,18 +366,6 @@ func checkFilenameTemplate(s string) error {
 		return fmt.Errorf("no ${%s} in pattern", remoteHostVarname)
 	}
 	return nil
-}
-
-func uniqueHosts(hosts []string) []string {
-	seen := make(map[string]struct{})
-	out := hosts[:0]
-	for _, v := range hosts {
-		if _, ok := seen[v]; !ok {
-			out = append(out, v)
-			seen[v] = struct{}{}
-		}
-	}
-	return out
 }
 
 func expandGroups(hosts []string, groupFile string) ([]string, error) {
@@ -440,12 +420,7 @@ func commonSuffix(l []string) string {
 
 func reverse(s string) string {
 	rs := []rune(s)
-	if len(rs) < 2 {
-		return s
-	}
-	for i, j := 0, len(rs)-1; i < j; i, j = i+1, j-1 {
-		rs[i], rs[j] = rs[j], rs[i]
-	}
+	slices.Reverse(rs)
 	return string(rs)
 }
 
@@ -453,7 +428,7 @@ func keyboardChallenge(user, instruction string, questions []string, echos []boo
 	if len(questions) == 0 {
 		return nil, nil
 	}
-	return nil, fmt.Errorf("keyboard interactive challenge is not supported")
+	return nil, errors.New("keyboard interactive challenge is not supported")
 }
 
 const keyEscape = 27
